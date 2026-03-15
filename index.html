@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Mercator Oblique - Référentiel Écran</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/topojson@3"></script>
+    <style>
+        body { margin: 0; background: #020617; color: #f8fafc; font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; width: 280px;
+            background: rgba(15, 23, 42, 0.9); padding: 20px; border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 100; backdrop-filter: blur(10px);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+        }
+        h1 { font-size: 1rem; margin: 0 0 10px 0; color: #38bdf8; border-bottom: 1px solid #1e293b; padding-bottom: 8px; }
+        .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-family: monospace; font-size: 0.7rem; margin-bottom: 10px; }
+        .stat-box { background: rgba(0,0,0,0.3); padding: 5px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05); }
+        .controls { font-size: 0.7rem; color: #94a3b8; line-height: 1.4; border-top: 1px solid #1e293b; padding-top: 10px; }
+        kbd { background: #1e293b; padding: 1px 3px; border-radius: 3px; border: 1px solid #334155; color: #f8fafc; }
+        canvas { display: block; cursor: crosshair; }
+        #loading { position: absolute; bottom: 10px; right: 10px; font-size: 0.7rem; color: #38bdf8; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1>🌍 Mercator Oblique v13</h1>
+    
+    <div class="stats">
+        <div class="stat-box">LON: <span id="v-lon">0</span>°</div>
+        <div class="stat-box">LAT: <span id="v-lat">0</span>°</div>
+        <div class="stat-box">ROLL: <span id="v-roll">0</span>°</div>
+        <div class="stat-box">ZOOM: <span id="v-zoom">250</span></div>
+    </div>
+
+    <div class="controls">
+        <b>SOURIS :</b><br>
+        • <kbd>Droit</kbd> Centrer sur le point<br>
+        • <kbd>Gauche</kbd> Glisser (suit la main)<br>
+        • <kbd>Molette</kbd> Zoom<br><br>
+        <b>CLAVIER :</b><br>
+        • <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> Déplacement relatif à l'écran<br>
+        • <kbd>A</kbd> / <kbd>E</kbd> Rotation (Roll)
+    </div>
+</div>
+
+<div id="loading">Initialisation...</div>
+<canvas id="mapCanvas"></canvas>
+
+<script>
+    const canvas = d3.select("#mapCanvas");
+    const ctx = canvas.node().getContext("2d");
+    
+    // Paramètres d'état
+    let rotation = [0, 0, 0]; // [λ, φ, γ]
+    let scale = 250;
+    let worldData = null;
+
+    const projection = d3.geoMercator();
+    const path = d3.geoPath(projection, ctx);
+    const graticule = d3.geoGraticule();
+
+    // Chargement de la carte (Optionnel mais recommandé)
+    d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(data => {
+        worldData = topojson.feature(data, data.objects.countries);
+        d3.select("#loading").text("Carte chargée (Mode Complet)");
+        render();
+    }).catch(() => {
+        d3.select("#loading").text("Mode Grille seule (Hors-ligne)");
+    });
+
+    /**
+     * MATRICE DE TRANSFORMATION :
+     * Convertit un mouvement (dx, dy) de l'écran en changement de rotation (dLon, dLat)
+     * en utilisant l'angle de Roll actuel.
+     */
+    function moveRelative(dx, dy) {
+        const gamma = rotation[2] * Math.PI / 180;
+        const sensitivity = 70 / scale; // La vitesse s'adapte au zoom
+
+        // Rotation du vecteur de mouvement pour correspondre à l'orientation du papier
+        const dLon = dx * Math.cos(gamma) + dy * Math.sin(gamma);
+        const dLat = -dx * Math.sin(gamma) + dy * Math.cos(gamma);
+
+        rotation[0] += dLon * sensitivity;
+        rotation[1] += dLat * sensitivity;
+
+        // Sécurité Mercator : évite l'étirement infini aux pôles
+        rotation[1] = Math.max(-89, Math.min(89, rotation[1]));
+        
+        render();
+    }
+
+    function render() {
+        const w = window.innerWidth, h = window.innerHeight;
+        canvas.attr("width", w).attr("height", h);
+
+        projection.scale(scale).translate([w/2, h/2]).rotate(rotation);
+
+        ctx.clearRect(0, 0, w, h);
+
+        // 1. Fond
+        ctx.beginPath(); path({type: "Sphere"});
+        ctx.fillStyle = "#0f172a"; ctx.fill();
+
+        // 2. Grille (Générée mathématiquement)
+        ctx.beginPath(); path(graticule());
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.1)";
+        ctx.lineWidth = 0.5; ctx.stroke();
+
+        // 3. Carte (si chargée)
+        if (worldData) {
+            ctx.beginPath(); path(worldData);
+            ctx.fillStyle = "#1e293b"; ctx.fill();
+            ctx.strokeStyle = "#334155"; ctx.lineWidth = 0.8; ctx.stroke();
+        }
+
+        // 4. Lignes Spéciales (Équateur et Tropiques)
+        drawSpecialLine(0, "#ef4444", 2); // Équateur
+        drawSpecialLine(23.44, "#fb923c", 1.2, [5, 5]); // Tropique Cancer
+        drawSpecialLine(-23.44, "#fb923c", 1.2, [5, 5]); // Tropique Capricorne
+
+        updateUI();
+    }
+
+    function drawSpecialLine(lat, color, width, dash = []) {
+        ctx.beginPath(); ctx.setLineDash(dash);
+        path({type: "LineString", coordinates: [[-180, lat], [180, lat]]});
+        ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // --- GESTIONNAIRES D'ÉVÉNEMENTS ---
+
+    // Glissement à la souris (Clic gauche)
+    canvas.call(d3.drag().on("drag", (e) => {
+        moveRelative(e.dx, -e.dy);
+    }));
+
+    // Recentrage (Clic droit)
+    canvas.on("contextmenu", (e) => {
+        e.preventDefault();
+        const coords = projection.invert(d3.pointer(e));
+        if (coords) {
+            rotation[0] = -coords[0];
+            rotation[1] = -coords[1];
+            render();
+        }
+    });
+
+    // Zoom (Molette)
+    window.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        scale *= (e.deltaY > 0 ? 0.9 : 1.1);
+        scale = Math.max(100, Math.min(15000, scale));
+        render();
+    }, { passive: false });
+
+    // Clavier (Flèches et A/E)
+    window.addEventListener("keydown", (e) => {
+        const step = 20; // Pixels virtuels
+        switch(e.key) {
+            case "ArrowLeft":  moveRelative(-step, 0); break;
+            case "ArrowRight": moveRelative(step, 0); break;
+            case "ArrowUp":    moveRelative(0, step); break;
+            case "ArrowDown":  moveRelative(0, -step); break;
+            case "a": case "A": rotation[2] -= 5; render(); break;
+            case "e": case "E": rotation[2] += 5; render(); break;
+        }
+    });
+
+    function updateUI() {
+        d3.select("#v-lon").text((-rotation[0]).toFixed(1));
+        d3.select("#v-lat").text((-rotation[1]).toFixed(1));
+        d3.select("#v-roll").text(rotation[2].toFixed(1));
+        d3.select("#v-zoom").text(Math.round(scale));
+    }
+
+    window.addEventListener("resize", render);
+    render();
+</script>
+</body>
+</html>
