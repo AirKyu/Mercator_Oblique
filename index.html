@@ -2,16 +2,21 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Mercator Oblique & Globe Controller</title>
+    <title>Mercator Oblique & Globe V15</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/topojson@3"></script>
     <style>
         body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #020617; overflow: hidden; color: white; }
         #ui { position: absolute; top: 20px; left: 20px; width: 260px; background: rgba(15, 23, 42, 0.9); padding: 20px; border-radius: 12px; z-index: 100; border: 1px solid #38bdf8; backdrop-filter: blur(8px); }
-        #globe-container { position: absolute; bottom: 30px; right: 30px; width: 220px; height: 220px; background: #000; border-radius: 50%; border: 2px solid #38bdf8; z-index: 100; cursor: grab; box-shadow: 0 0 30px rgba(56, 189, 248, 0.4); }
+        
+        #globe-ui { position: absolute; bottom: 30px; right: 30px; z-index: 100; display: flex; flex-direction: column; align-items: center; }
+        #globe-container { width: 200px; height: 200px; background: #000; border-radius: 50%; border: 2px solid #38bdf8; cursor: grab; box-shadow: 0 0 30px rgba(56, 189, 248, 0.4); position: relative; }
+        
+        .roll-controls { display: flex; gap: 40px; margin-bottom: 10px; }
+        .roll-btn { background: rgba(56, 189, 248, 0.2); border: 1px solid #38bdf8; color: #38bdf8; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .roll-btn:hover { background: #38bdf8; color: #020617; }
+
         .stats { font-family: monospace; font-size: 0.75rem; color: #34d399; margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-        .kbd-hint { font-size: 0.7rem; color: #94a3b8; margin-top: 15px; border-top: 1px solid #334155; padding-top: 10px; }
-        kbd { background: #334155; padding: 2px 4px; border-radius: 4px; border: 1px solid #475569; }
         canvas { display: block; }
         #mapCanvas { cursor: crosshair; }
     </style>
@@ -19,22 +24,24 @@
 <body>
 
 <div id="ui">
-    <h2 style="margin:0; font-size: 1rem; color: #38bdf8;">🌍 Mercator Oblique v14</h2>
+    <h2 style="margin:0; font-size: 1rem; color: #38bdf8;">🌍 Mercator Pro v15</h2>
     <div class="stats">
         <div>LON: <span id="v-lon">0</span>°</div>
         <div>LAT: <span id="v-lat">0</span>°</div>
         <div>ROLL: <span id="v-rol">0</span>°</div>
         <div>ZOOM: <span id="v-zom">100</span>%</div>
     </div>
-    <div class="kbd-hint">
-        • <kbd>↑↓←→</kbd> : Déplacement relatif écran<br>
-        • <kbd>A</kbd> / <kbd>E</kbd> : Rotation (Roll)<br>
-        • <kbd>Droit</kbd> : Centrer sur point
-    </div>
+    <button onclick="resetView()" style="width:100%; margin-top:10px; cursor:pointer; background:#ef4444; color:white; border:none; border-radius:4px; padding:5px;">Réinitialiser</button>
 </div>
 
-<div id="globe-container">
-    <canvas id="globeCanvas"></canvas>
+<div id="globe-ui">
+    <div class="roll-controls">
+        <button class="roll-btn" onclick="rotateZ(-10)" title="Rotation anti-horaire">↺</button>
+        <button class="roll-btn" onclick="rotateZ(10)" title="Rotation horaire">↻</button>
+    </div>
+    <div id="globe-container">
+        <canvas id="globeCanvas"></canvas>
+    </div>
 </div>
 
 <canvas id="mapCanvas"></canvas>
@@ -44,7 +51,7 @@
     const globeCtx = d3.select("#globeCanvas").node().getContext("2d");
     
     let worldData = null;
-    let rotation = [0, 0, 0]; // [Longitude, Latitude, Roll]
+    let rotation = [0, 0, 0]; // [λ, φ, γ]
     let scale = 250;
 
     const projM = d3.geoMercator();
@@ -52,7 +59,6 @@
     const pathM = d3.geoPath(projM, mapCtx);
     const pathG = d3.geoPath(projG, globeCtx);
 
-    // Initialisation & Chargement
     d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(data => {
         worldData = topojson.feature(data, data.objects.countries);
         resize();
@@ -60,106 +66,110 @@
     });
 
     /**
-     * LE CŒUR DE LA CORRECTION : Mouvement relatif à l'écran
-     * On utilise le Roll (rotation[2]) pour corriger le vecteur de déplacement.
+     * LOGIQUE DE ROTATION RELATIVE (Clavier et Glissement Carte)
      */
     function moveRelative(dx, dy) {
-        const gamma = rotation[2] * Math.PI / 180;
-        const s = 65 / scale; // Vitesse proportionnelle au zoom
+        const r = rotation;
+        const gamma = r[2] * Math.PI / 180;
+        const s = 60 / scale;
 
-        // Matrice de rotation inverse : adapte dx/dy à l'inclinaison de la carte
+        // Transformation du mouvement souris vers le référentiel incliné
         const dLon = dx * Math.cos(gamma) + dy * Math.sin(gamma);
         const dLat = -dx * Math.sin(gamma) + dy * Math.cos(gamma);
 
         rotation[0] += dLon * s;
-        rotation[1] = Math.max(-89.9, Math.min(89.9, rotation[1] + dLat * s));
+        rotation[1] = Math.max(-89, Math.min(89, rotation[1] + dLat * s));
+        render();
+    }
+
+    /**
+     * ROTATION AXE Z (Les flèches au-dessus du globe)
+     */
+    function rotateZ(delta) {
+        rotation[2] += delta;
         render();
     }
 
     function render() {
         const w = window.innerWidth, h = window.innerHeight;
         
-        // 1. Mise à jour de Mercator
+        // Mercator
         projM.scale(scale).translate([w/2, h/2]).rotate(rotation);
         mapCtx.fillStyle = "#020617"; mapCtx.fillRect(0,0,w,h);
-        
-        // Fond sphérique
         mapCtx.beginPath(); pathM({type:"Sphere"}); mapCtx.fillStyle="#0f172a"; mapCtx.fill();
         drawContent(mapCtx, pathM);
 
-        // 2. Mise à jour du Globe (contrôleur)
-        projG.scale(108).translate([110, 110]).rotate(rotation);
-        globeCtx.clearRect(0,0,220,220);
-        globeCtx.beginPath(); globeCtx.arc(110,110,108,0,Math.PI*2); globeCtx.fillStyle="#0f172a"; globeCtx.fill();
+        // Globe
+        projG.scale(98).translate([100, 100]).rotate(rotation);
+        globeCtx.clearRect(0,0,200,200);
+        globeCtx.beginPath(); globeCtx.arc(100,100,98,0,Math.PI*2); globeCtx.fillStyle="#0f172a"; globeCtx.fill();
         drawContent(globeCtx, pathG);
         
-        // Contour du globe
-        globeCtx.beginPath(); globeCtx.arc(110,110,108,0,Math.PI*2); globeCtx.strokeStyle="#38bdf8"; globeCtx.stroke();
+        // Brillance contour globe
+        globeCtx.beginPath(); globeCtx.arc(100,100,98,0,Math.PI*2); globeCtx.strokeStyle="#38bdf8"; globeCtx.lineWidth=2; globeCtx.stroke();
 
         updateUI();
     }
 
     function drawContent(ctx, p) {
-        // Grille
         ctx.beginPath(); p(d3.geoGraticule()());
-        ctx.strokeStyle = "rgba(148, 163, 184, 0.1)"; ctx.lineWidth = 0.5; ctx.stroke();
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.1)"; ctx.stroke();
 
-        // Pays
         if (worldData) {
             ctx.beginPath(); p(worldData);
             ctx.fillStyle = "#1e293b"; ctx.fill();
-            ctx.strokeStyle = "#334155"; ctx.lineWidth = 1; ctx.stroke();
+            ctx.strokeStyle = "#334155"; ctx.stroke();
         }
 
-        // Équateur & Tropiques
-        drawLine(ctx, p, 0, "#ef4444", 2); // Equator
-        drawLine(ctx, p, 23.4, "#fb923c", 1.2, [4,4]); // Tropics
-        drawLine(ctx, p, -23.4, "#fb923c", 1.2, [4,4]);
-    }
-
-    function drawLine(ctx, p, lat, col, lw, dash=[]) {
-        ctx.beginPath(); ctx.setLineDash(dash);
-        p({type:"LineString", coordinates:[[-180, lat], [180, lat]]});
-        ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.stroke();
+        // Lignes de référence fixes
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.strokeStyle = "#ef4444"; ctx.lineWidth = 2;
+        p({type:"LineString", coordinates:[[-180, 0], [180, 0]]}); ctx.stroke(); // Equateur
+        
+        ctx.beginPath(); ctx.strokeStyle = "#fb923c"; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
+        p({type:"LineString", coordinates:[[-180, 23.4], [180, 23.4]]}); ctx.stroke(); // Tropique N
+        p({type:"LineString", coordinates:[[-180, -23.4], [180, -23.4]]}); ctx.stroke(); // Tropique S
         ctx.setLineDash([]);
     }
 
-    // --- INTERACTIONS ---
+    // --- INTERACTIONS SPHÉRIQUES (Globe) ---
+    let v0, r0, q0;
 
-    // Drag sur la carte (Mouvement relatif écran)
+    d3.select("#globeCanvas").call(d3.drag()
+        .on("start", (e) => {
+            // On mémorise la rotation exacte au moment du clic
+            v0 = [e.x, e.y];
+            r0 = [...rotation];
+        })
+        .on("drag", (e) => {
+            const k = 70 / projG.scale();
+            rotation[0] = r0[0] + (e.x - v0[0]) * k;
+            rotation[1] = r0[1] - (e.y - v0[1]) * k;
+            render();
+        })
+    );
+
+    // --- AUTRES INTERACTIONS ---
     d3.select("#mapCanvas").call(d3.drag().on("drag", e => moveRelative(e.dx, -e.dy)));
 
-    // Drag sur le globe (Rotation directe)
-    d3.select("#globeCanvas").call(d3.drag().on("drag", e => {
-        const k = 70 / projG.scale();
-        rotation[0] += e.dx * k;
-        rotation[1] -= e.dy * k;
-        render();
-    }));
-
-    // Clic droit : Centrer
-    d3.select("#mapCanvas").on("contextmenu", e => {
-        e.preventDefault();
-        const p = projM.invert(d3.pointer(e));
-        if (p) { rotation[0] = -p[0]; rotation[1] = -p[1]; render(); }
-    });
-
-    // Zoom & Clavier
     window.addEventListener("wheel", e => {
-        e.preventDefault(); scale *= (e.deltaY > 0 ? 0.9 : 1.1);
-        scale = Math.max(100, Math.min(10000, scale)); render();
+        e.preventDefault(); scale *= (e.deltaY > 0 ? 0.9 : 1.1); render();
     }, {passive:false});
 
     window.addEventListener("keydown", e => {
         const s = 10;
         switch(e.key) {
-            case "ArrowLeft":  moveRelative(-s, 0); break;
+            case "ArrowLeft": moveRelative(-s, 0); break;
             case "ArrowRight": moveRelative(s, 0); break;
-            case "ArrowUp":    moveRelative(0, s); break;
-            case "ArrowDown":  moveRelative(0, -s); break;
-            case "a": case "A": rotation[2] -= 5; render(); break;
-            case "e": case "E": rotation[2] += 5; render(); break;
+            case "ArrowUp": moveRelative(0, s); break;
+            case "ArrowDown": moveRelative(0, -s); break;
         }
+    });
+
+    d3.select("#mapCanvas").on("contextmenu", e => {
+        e.preventDefault();
+        const p = projM.invert(d3.pointer(e));
+        if (p) { rotation[0] = -p[0]; rotation[1] = -p[1]; render(); }
     });
 
     function updateUI() {
@@ -169,12 +179,13 @@
         d3.select("#v-zom").text(Math.round(scale/2.5));
     }
 
+    function resetView() { rotation = [0,0,0]; scale=250; render(); }
+
     function resize() {
         d3.select("#mapCanvas").attr("width", window.innerWidth).attr("height", window.innerHeight);
-        d3.select("#globeCanvas").attr("width", 220).attr("height", 220);
+        d3.select("#globeCanvas").attr("width", 200).attr("height", 200);
         render();
     }
-
     window.addEventListener("resize", resize);
 </script>
 </body>
