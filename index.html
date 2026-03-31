@@ -2,59 +2,115 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Mercator Oblique - Pro Performance</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mercator Oblique - Mobile HD</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/topojson@3"></script>
     <style>
-        body { margin: 0; background: #020617; color: white; font-family: sans-serif; overflow: hidden; }
+        body { margin: 0; background: #020617; color: white; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        
+        /* Globe Pilote (Plus petit sur mobile) */
         #globe-box {
-            position: absolute; top: 20px; left: 20px;
-            width: 180px; height: 180px;
-            border: 2px solid #38bdf8; border-radius: 50%;
+            position: absolute; top: 10px; left: 10px;
+            width: 120px; height: 120px;
+            border: 1px solid #38bdf8; border-radius: 50%;
             background: #000; z-index: 50; overflow: hidden;
-            box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
         }
-        #ui {
-            position: absolute; bottom: 20px; left: 20px;
-            background: rgba(15, 23, 42, 0.9); padding: 12px;
-            border-radius: 8px; border: 1px solid #1e293b; z-index: 50;
-            font-size: 0.75rem; pointer-events: none;
+
+        /* Panneau de commandes tactiles */
+        #controls-mobile {
+            position: absolute; bottom: 10px; left: 50%;
+            transform: translateX(-50%);
+            display: grid; grid-template-columns: repeat(3, 1fr);
+            gap: 10px; background: rgba(15, 23, 42, 0.85);
+            padding: 15px; border-radius: 15px;
+            border: 1px solid #1e293b; z-index: 100;
+            width: 90%; max-width: 400px;
+            backdrop-filter: blur(10px);
         }
+
+        .axis-ctrl { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+        .axis-label { font-size: 0.65rem; color: #38bdf8; font-weight: bold; text-transform: uppercase; }
+        
+        .btn-grid { display: flex; gap: 5px; }
+        .btn-ui {
+            width: 45px; height: 45px;
+            background: #1e293b; border: 1px solid #38bdf8;
+            color: white; border-radius: 8px;
+            font-size: 1.2rem; font-weight: bold;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; -webkit-tap-highlight-color: transparent;
+        }
+        .btn-ui:active { background: #38bdf8; color: #020617; }
+
+        #stats-mini {
+            position: absolute; top: 10px; right: 10px;
+            font-family: monospace; font-size: 0.7rem; color: #34d399;
+            background: rgba(0,0,0,0.5); padding: 5px; border-radius: 5px;
+        }
+
         canvas { display: block; position: absolute; top: 0; left: 0; }
         #mC { z-index: 1; }
     </style>
 </head>
 <body>
 
-<div id="globe-box"><canvas id="gC" width="180" height="180"></canvas></div>
-<div id="ui">🚀 <b>Mode Performance HD</b> | Flèches & A/E | Molette Zoom</div>
+<div id="globe-box"><canvas id="gC" width="120" height="120"></canvas></div>
+
+<div id="stats-mini">
+    LON: <span id="s1">0</span> | LAT: <span id="s2">0</span> | ROL: <span id="s3">0</span>
+</div>
+
+<div id="controls-mobile">
+    <div class="axis-ctrl">
+        <div class="axis-label">Axe 1 (λ)</div>
+        <div class="btn-grid">
+            <button class="btn-ui" onclick="step(0, -1)">-</button>
+            <button class="btn-ui" onclick="step(0, 1)">+</button>
+        </div>
+    </div>
+    <div class="axis-ctrl">
+        <div class="axis-label">Axe 2 (φ)</div>
+        <div class="btn-grid">
+            <button class="btn-ui" onclick="step(1, -1)">-</button>
+            <button class="btn-ui" onclick="step(1, 1)">+</button>
+        </div>
+    </div>
+    <div class="axis-ctrl">
+        <div class="axis-label">Axe 3 (γ)</div>
+        <div class="btn-grid">
+            <button class="btn-ui" onclick="step(2, -1)">-</button>
+            <button class="btn-ui" onclick="step(2, 1)">+</button>
+        </div>
+    </div>
+</div>
+
 <canvas id="mC"></canvas>
 
 <script>
     const mCanvas = d3.select("#mC");
-    const mCtx = mCanvas.node().getContext("2d", { alpha: false }); // Optimisation : pas de transparence alpha
+    const mCtx = mCanvas.node().getContext("2d", { alpha: false });
     const gCanvas = d3.select("#gC");
     const gCtx = gCanvas.node().getContext("2d");
 
     let world = null;
     let rotation = [0, 0, 0];
-    let scale = 350;
-    let needsUpdate = true; // Flag pour savoir s'il faut redessiner
+    let scale = 300;
+    let needsUpdate = true;
     const dpr = window.devicePixelRatio || 1;
 
     const projM = d3.geoMercator();
-    const projG = d3.geoOrthographic().clipAngle(90).scale(88).translate([90, 90]);
+    const projG = d3.geoOrthographic().clipAngle(90).scale(58).translate([60, 60]);
     const pathM = d3.geoPath(projM, mCtx);
     const pathG = d3.geoPath(projG, gCtx);
 
-    // Chargement HD 50m
+    // Chargement Haute Définition
     d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json").then(data => {
         world = topojson.feature(data, data.objects.countries);
         resize();
-        requestAnimationFrame(gameLoop); // Lancement de la boucle fluide
+        requestAnimationFrame(gameLoop);
     });
 
-    // BOUCLE DE RENDU 60 FPS
     function gameLoop() {
         if (needsUpdate && world) {
             render();
@@ -68,56 +124,64 @@
         projM.scale(scale).translate([w/2, h/2]).rotate(rotation);
         projG.rotate(rotation);
 
-        // --- MERCATOR ---
         mCtx.fillStyle = "#020617";
         mCtx.fillRect(0, 0, w, h);
 
-        // Grille (On dessine moins de lignes pour gagner en fluidité)
-        mCtx.beginPath(); pathM(d3.geoGraticule().step([20, 20])());
+        // Grille simplifiée pour mobile
+        mCtx.beginPath(); pathM(d3.geoGraticule().step([30, 30])());
         mCtx.strokeStyle = "rgba(148, 163, 184, 0.1)"; mCtx.lineWidth = 0.5; mCtx.stroke();
 
-        // Pays HD
+        // Pays
         mCtx.beginPath(); pathM(world);
         mCtx.fillStyle = "#1e293b"; mCtx.fill();
         mCtx.strokeStyle = "#334155"; mCtx.lineWidth = 0.8; mCtx.stroke();
 
-        // Equateur Rouge (Haute priorité)
+        // Equateur Rouge
         mCtx.beginPath();
         pathM({type: "LineString", coordinates: Array.from({length: 181}, (_, i) => [i*2 - 180, 0])});
         mCtx.strokeStyle = "#ef4444"; mCtx.lineWidth = 3;
         mCtx.shadowBlur = 8; mCtx.shadowColor = "#ef4444";
         mCtx.stroke(); mCtx.shadowBlur = 0;
 
-        // --- GLOBE ---
-        gCtx.clearRect(0, 0, 180, 180);
-        gCtx.beginPath(); gCtx.arc(90, 90, 88, 0, Math.PI*2);
+        // Globe
+        gCtx.clearRect(0, 0, 120, 120);
+        gCtx.beginPath(); gCtx.arc(60, 60, 58, 0, Math.PI*2);
         gCtx.fillStyle = "#0f172a"; gCtx.fill();
-        
         gCtx.beginPath(); pathG(world);
         gCtx.fillStyle = "#1e293b"; gCtx.fill();
         gCtx.strokeStyle = "#334155"; gCtx.stroke();
-
         gCtx.beginPath();
         pathG({type: "LineString", coordinates: Array.from({length: 91}, (_, i) => [i*4 - 180, 0])});
-        gCtx.strokeStyle = "#ef4444"; gCtx.lineWidth = 2; gCtx.stroke();
+        gCtx.strokeStyle = "#ef4444"; gCtx.lineWidth = 1.5; gCtx.stroke();
+
+        updateStats();
     }
 
-    // Gestion du clavier ultra-réactive
-    const keys = {};
-    window.addEventListener("keydown", e => { keys[e.key] = true; updateLogic(); });
-    window.addEventListener("keyup", e => { keys[e.key] = false; });
+    // Fonction de clic (1 degré par clic)
+    window.step = function(axis, delta) {
+        rotation[axis] += delta;
+        if(axis === 1) rotation[1] = Math.max(-89, Math.min(89, rotation[1]));
+        needsUpdate = true;
+    };
 
-    function updateLogic() {
-        const s = 4;
-        if(keys["ArrowLeft"])  { rotation[0] -= s; needsUpdate = true; }
-        if(keys["ArrowRight"]) { rotation[0] += s; needsUpdate = true; }
-        if(keys["ArrowUp"])    { rotation[1] += s; needsUpdate = true; }
-        if(keys["ArrowDown"])  { rotation[1] -= s; needsUpdate = true; }
-        if(keys["a"] || keys["A"]) { rotation[2] -= s; needsUpdate = true; }
-        if(keys["e"] || keys["E"]) { rotation[2] += s; needsUpdate = true; }
-        if(Object.values(keys).some(v => v)) requestAnimationFrame(updateLogic);
+    function updateStats() {
+        d3.select("#s1").text((-rotation[0]).toFixed(0));
+        d3.select("#s2").text((-rotation[1]).toFixed(0));
+        d3.select("#s3").text(rotation[2].toFixed(0));
     }
 
+    // Support Clavier conservé
+    window.addEventListener("keydown", e => {
+        const s = 1; // On passe à 1° pour la cohérence
+        if(e.key === "ArrowLeft") step(0, -s);
+        if(e.key === "ArrowRight") step(0, s);
+        if(e.key === "ArrowUp") step(1, s);
+        if(e.key === "ArrowDown") step(1, -s);
+        if(e.key.toLowerCase() === "a") step(2, -s);
+        if(e.key.toLowerCase() === "e") step(2, s);
+    });
+
+    // Zoom tactile (pincement) ou molette
     window.addEventListener("wheel", e => {
         scale *= (e.deltaY > 0 ? 0.94 : 1.06);
         needsUpdate = true;
@@ -127,7 +191,7 @@
         const w = window.innerWidth, h = window.innerHeight;
         mCanvas.attr("width", w * dpr).attr("height", h * dpr).style("width", w + "px").style("height", h + "px");
         mCtx.scale(dpr, dpr);
-        gCanvas.attr("width", 180 * dpr).attr("height", 180 * dpr).style("width", "180px").style("height", "180px");
+        gCanvas.attr("width", 120 * dpr).attr("height", 120 * dpr).style("width", "120px").style("height", "120px");
         gCtx.scale(dpr, dpr);
         needsUpdate = true;
     }
