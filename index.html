@@ -2,100 +2,143 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Mercator Debug Version</title>
+    <title>Mercator Oblique - Equateur Fixe</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/topojson@3"></script>
     <style>
-        body { margin: 0; background: #020617; color: #38bdf8; font-family: sans-serif; overflow: hidden; }
-        #ui { position: absolute; top: 20px; left: 20px; z-index: 100; background: rgba(15,23,42,0.8); padding: 15px; border-radius: 10px; border: 1px solid #38bdf8; }
+        body { margin: 0; background: #020617; color: white; font-family: sans-serif; overflow: hidden; }
+        #globe-box {
+            position: absolute; top: 20px; left: 20px;
+            width: 180px; height: 180px;
+            border: 2px solid #38bdf8; border-radius: 50%;
+            background: #000; z-index: 100; overflow: hidden;
+        }
+        #ui {
+            position: absolute; bottom: 20px; left: 20px;
+            background: rgba(15, 23, 42, 0.9); padding: 15px;
+            border-radius: 10px; border: 1px solid #1e293b; z-index: 100;
+        }
         canvas { display: block; position: absolute; top: 0; left: 0; }
-        #globe-box { position: absolute; top: 20px; right: 20px; width: 150px; height: 150px; border: 1px solid #38bdf8; border-radius: 50%; overflow: hidden; z-index: 100; }
+        #mC { z-index: 1; } /* Mercator */
+        #gC { z-index: 101; } /* Globe */
     </style>
 </head>
 <body>
 
+<div id="globe-box"><canvas id="gC" width="180" height="180"></canvas></div>
+
 <div id="ui">
-    <h3 style="margin:0">🛠️ Test de Rendu</h3>
-    <div id="status">Connexion aux données...</div>
-    <p style="font-size: 0.7rem; color: #94a3b8;">Si vous voyez une grille bleue, le moteur fonctionne.</p>
+    <b style="color:#38bdf8">CONTRÔLES CLAVIER :</b><br>
+    • <kbd>↑↓←→</kbd> : Axes 1 et 2<br>
+    • <kbd>A</kbd> / <kbd>E</kbd> : Axe 3 (Roll)<br>
+    • <kbd>Molette</kbd> : Zoom<br>
+    <span id="status" style="font-size:0.8rem; color:#ef4444">L'Equateur est la ligne rouge fixe.</span>
 </div>
 
-<div id="globe-box"><canvas id="gC" width="150" height="150"></canvas></div>
 <canvas id="mC"></canvas>
 
 <script>
     const mCtx = d3.select("#mC").node().getContext("2d");
     const gCtx = d3.select("#gC").node().getContext("2d");
-    let rotation = [0, 0, 0];
-    let scale = 250;
+    
     let world = null;
+    let rotation = [0, 0, 0];
+    let scale = 300;
 
     const projM = d3.geoMercator();
-    const projG = d3.geoOrthographic().clipAngle(90).scale(73).translate([75, 75]);
+    const projG = d3.geoOrthographic().clipAngle(90).scale(88).translate([90, 90]);
+    
     const pathM = d3.geoPath(projM, mCtx);
     const pathG = d3.geoPath(projG, gCtx);
 
-    // 1. On lance le rendu IMMEDIATEMENT avec une grille
+    // Fonction pour générer l'objet "Equateur" proprement (un cercle de 360 points)
+    const equator = d3.geoCircle().center([0, 0]).radius(90)(); 
+    // Note : radius(90) pour un cercle polaire par rapport au centre = l'équateur
+
+    d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(data => {
+        world = topojson.feature(data, data.objects.countries);
+        resize();
+        render();
+    }).catch(() => { resize(); render(); });
+
     function render() {
         const w = window.innerWidth, h = window.innerHeight;
-        d3.select("#mC").attr("width", w).attr("height", h);
         
+        // Configuration projections
         projM.scale(scale).translate([w/2, h/2]).rotate(rotation);
         projG.rotate(rotation);
 
-        // Dessin Mercator
-        mCtx.fillStyle = "#020617"; mCtx.fillRect(0,0,w,h);
-        drawCommon(mCtx, pathM, true);
-
-        // Dessin Globe
-        gCtx.clearRect(0,0,150,150);
-        gCtx.beginPath(); gCtx.arc(75,75,73,0,Math.PI*2); gCtx.fillStyle="#0f172a"; gCtx.fill();
-        drawCommon(gCtx, pathG, false);
-    }
-
-    function drawCommon(ctx, p, full) {
-        // Grille (toujours visible)
-        ctx.beginPath(); p(d3.geoGraticule()());
-        ctx.strokeStyle = "rgba(56, 189, 248, 0.2)"; ctx.stroke();
-
-        // Pays (si chargés)
+        // --- DESSIN MERCATOR (FOND) ---
+        mCtx.fillStyle = "#020617"; mCtx.fillRect(0, 0, w, h);
+        
+        // 1. Pays
         if (world) {
-            ctx.beginPath(); p(world);
-            ctx.fillStyle = "#1e293b"; ctx.fill();
-            ctx.strokeStyle = "#334155"; ctx.stroke();
+            mCtx.beginPath(); pathM(world);
+            mCtx.fillStyle = "#1e293b"; mCtx.fill();
+            mCtx.strokeStyle = "#334155"; mCtx.stroke();
         }
 
-        // Equateur ROUGE
-        ctx.beginPath(); p({type:"LineString", coordinates:[[-180,0],[180,0]]});
-        ctx.strokeStyle = "#ef4444"; ctx.lineWidth = full ? 3 : 1; ctx.stroke();
+        // 2. Grille
+        mCtx.beginPath(); pathM(d3.geoGraticule()());
+        mCtx.strokeStyle = "rgba(255,255,255,0.05)"; mCtx.stroke();
+
+        // 3. EQUATEUR ROUGE (Dessiné en dernier pour être au-dessus)
+        mCtx.beginPath();
+        // On dessine une ligne explicite sur la latitude 0
+        pathM({type: "LineString", coordinates: Array.from({length: 361}, (_, i) => [i - 180, 0])});
+        mCtx.strokeStyle = "#ef4444";
+        mCtx.lineWidth = 4;
+        mCtx.shadowBlur = 10;
+        mCtx.shadowColor = "#ef4444";
+        mCtx.stroke();
+        mCtx.shadowBlur = 0; // Reset
+
+        // --- DESSIN GLOBE (OVERLAY) ---
+        gCtx.clearRect(0,0,180,180);
+        gCtx.beginPath(); gCtx.arc(90,90,88,0,Math.PI*2);
+        gCtx.fillStyle = "#0f172a"; gCtx.fill();
+        
+        if (world) {
+            gCtx.beginPath(); pathG(world);
+            gCtx.fillStyle = "#1e293b"; gCtx.fill();
+            gCtx.strokeStyle = "#334155"; gCtx.stroke();
+        }
+        
+        // Equateur sur le globe
+        gCtx.beginPath();
+        pathG({type: "LineString", coordinates: Array.from({length: 361}, (_, i) => [i - 180, 0])});
+        gCtx.strokeStyle = "#ef4444"; gCtx.lineWidth = 2; gCtx.stroke();
+        
+        // Contour brillant du globe
+        gCtx.beginPath(); gCtx.arc(90,90,88,0,Math.PI*2);
+        gCtx.strokeStyle = "#38bdf8"; gCtx.lineWidth = 2; gCtx.stroke();
     }
 
-    // 2. Tentative de chargement des pays
-    d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
-        .then(data => {
-            world = topojson.feature(data, data.objects.countries);
-            d3.select("#status").text("✅ Carte chargée").style("color", "#34d399");
-            render();
-        })
-        .catch(e => {
-            d3.select("#status").text("⚠️ Mode Grille (Offline)").style("color", "#fbbf24");
-            render();
-        });
-
-    // Contrôles
+    // Commandes clavier
     window.addEventListener("keydown", e => {
         const s = 5;
         if(e.key === "ArrowLeft") rotation[0] -= s;
         if(e.key === "ArrowRight") rotation[0] += s;
         if(e.key === "ArrowUp") rotation[1] += s;
         if(e.key === "ArrowDown") rotation[1] -= s;
-        if(e.key === "a") rotation[2] -= s;
-        if(e.key === "e") rotation[2] += s;
+        if(e.key === "a" || e.key === "A") rotation[2] -= s;
+        if(e.key === "e" || e.key === "E") rotation[2] += s;
         render();
     });
 
-    window.addEventListener("resize", render);
-    render();
+    // Zoom
+    window.addEventListener("wheel", e => {
+        e.preventDefault();
+        scale *= (e.deltaY > 0 ? 0.9 : 1.1);
+        render();
+    }, {passive:false});
+
+    function resize() {
+        const w = window.innerWidth, h = window.innerHeight;
+        d3.select("#mC").attr("width", w).attr("height", h);
+        render();
+    }
+    window.addEventListener("resize", resize);
 </script>
 </body>
 </html>
