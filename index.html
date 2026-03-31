@@ -2,62 +2,75 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Mercator Oblique - Version Stable</title>
+    <title>Mercator Oblique - Plein Écran & Zoom</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/topojson@3"></script>
     <style>
         body { margin: 0; background: #020617; color: white; font-family: sans-serif; overflow: hidden; }
         
-        /* Fenetre Globe (Pilote) en haut a gauche */
+        /* Globe Pilote (Top-Left) */
         #globe-box {
             position: absolute; top: 20px; left: 20px;
-            width: 200px; height: 200px;
+            width: 180px; height: 180px;
             border: 2px solid #38bdf8; border-radius: 50%;
-            background: #000; z-index: 20; overflow: hidden;
+            background: #000; z-index: 50; overflow: hidden;
             box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
+            pointer-events: none; /* Ne gêne pas le clic sur la carte */
         }
 
-        #coords {
-            position: absolute; top: 230px; left: 20px;
-            background: rgba(15, 23, 42, 0.8); padding: 10px;
-            border-radius: 8px; font-family: monospace; font-size: 11px; z-index: 20;
+        #ui-info {
+            position: absolute; bottom: 20px; left: 20px;
+            background: rgba(15, 23, 42, 0.85); padding: 15px;
+            border-radius: 10px; border: 1px solid #1e293b; z-index: 50;
+            font-size: 0.75rem; line-height: 1.4;
         }
 
-        canvas { display: block; }
-        #map-canvas { position: absolute; top: 0; left: 0; z-index: 1; }
+        .stat { color: #34d399; font-family: monospace; font-size: 0.85rem; margin-bottom: 8px; }
+        kbd { background: #334155; padding: 2px 4px; border-radius: 4px; border: 1px solid #475569; }
+
+        canvas { display: block; position: absolute; top: 0; left: 0; }
+        #map-canvas { z-index: 1; }
+        #globe-canvas { z-index: 51; }
     </style>
 </head>
 <body>
 
 <div id="globe-box">
-    <canvas id="globe-canvas" width="200" height="200"></canvas>
+    <canvas id="globe-canvas" width="180" height="180"></canvas>
 </div>
 
-<div id="coords">
-    AXE 1 (Lon): <span id="v1">0</span>°<br>
-    AXE 2 (Lat): <span id="v2">0</span>°<br>
-    AXE 3 (Rol): <span id="v3">0</span>°
+<div id="ui-info">
+    <div class="stat">
+        LON: <span id="v1">0</span>° | 
+        LAT: <span id="v2">0</span>° | 
+        ROLL: <span id="v3">0</span>°
+    </div>
+    <b>CONTRÔLES :</b><br>
+    • <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> : Rotation Axes 1 & 2<br>
+    • <kbd>A</kbd> / <kbd>E</kbd> : Rotation Axe 3 (Roll)<br>
+    • <kbd>Molette</kbd> : Zoom / Dézoom<br>
+    • <kbd>Espace</kbd> : Réinitialiser
 </div>
 
 <canvas id="map-canvas"></canvas>
 
 <script>
-    const gCanvas = d3.select("#globe-canvas");
-    const gCtx = gCanvas.node().getContext("2d");
     const mCanvas = d3.select("#map-canvas");
     const mCtx = mCanvas.node().getContext("2d");
+    const gCanvas = d3.select("#globe-canvas");
+    const gCtx = gCanvas.node().getContext("2d");
 
     let world = null;
-    let rotation = [0, 0, 0]; // [Longitude, Latitude, Roll]
-    let zoom = 250;
+    let rotation = [0, 0, 0]; // [λ, φ, γ]
+    let scale = 300; // Niveau de zoom initial
 
-    const projG = d3.geoOrthographic().clipAngle(90).scale(98).translate([100, 100]);
+    const projG = d3.geoOrthographic().clipAngle(90).scale(88).translate([90, 90]);
     const projM = d3.geoMercator();
 
     const pathG = d3.geoPath(projG, gCtx);
     const pathM = d3.geoPath(projM, mCtx);
 
-    // Chargement des pays
+    // Chargement des données
     d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(data => {
         world = topojson.feature(data, data.objects.countries);
         resize();
@@ -65,61 +78,34 @@
     });
 
     function render() {
-        if (!world) return;
         const w = window.innerWidth;
         const h = window.innerHeight;
 
-        // 1. Mise a jour du Globe
+        // 1. GLOBE (Pilote)
         projG.rotate(rotation);
-        gCtx.clearRect(0, 0, 200, 200);
-        gCtx.beginPath(); gCtx.arc(100, 100, 98, 0, 6.28);
+        gCtx.clearRect(0, 0, 180, 180);
+        
+        // Fond mer globe
+        gCtx.beginPath(); gCtx.arc(90, 90, 88, 0, Math.PI * 2);
         gCtx.fillStyle = "#0f172a"; gCtx.fill();
-        draw(gCtx, pathG, 0.5);
+        
+        drawContent(gCtx, pathG, false);
 
-        // 2. Mise a jour de Mercator
-        projM.scale(zoom).translate([w/2, h/2]).rotate(rotation);
+        // 2. CARTE MERCATOR (Plein écran)
+        projM.scale(scale).translate([w / 2, h / 2]).rotate(rotation);
         mCtx.clearRect(0, 0, w, h);
         mCtx.fillStyle = "#020617"; mCtx.fillRect(0, 0, w, h);
-        draw(mCtx, pathM, 1);
+        
+        drawContent(mCtx, pathM, true);
 
         // UI
         d3.select("#v1").text((-rotation[0]).toFixed(1));
         d3.select("#v2").text((-rotation[1]).toFixed(1));
         d3.select("#v3").text(rotation[2].toFixed(1));
+        d3.select("#val-zoom").text(Math.round(scale));
     }
 
-    function draw(ctx, p, lw) {
-        // Grille
+    function drawContent(ctx, p, isFullMap) {
+        // Grille (Méridiens et Parallèles)
         ctx.beginPath(); p(d3.geoGraticule()());
-        ctx.strokeStyle = "rgba(255,255,255,0.1)"; ctx.lineWidth = 0.5; ctx.stroke();
-        // Pays
-        ctx.beginPath(); p(world);
-        ctx.fillStyle = "#1e293b"; ctx.fill();
-        ctx.strokeStyle = "#334155"; ctx.lineWidth = lw; ctx.stroke();
-        // Equateur
-        ctx.beginPath(); p({type:"LineString", coordinates:[[-180,0],[180,0]]});
-        ctx.strokeStyle = "#ef4444"; ctx.lineWidth = 2; ctx.stroke();
-    }
-
-    // Gestion du Clavier (Les 3 axes)
-    window.addEventListener("keydown", e => {
-        const s = 5;
-        if(e.key === "ArrowLeft")  rotation[0] -= s; // Axe 1 : Poles
-        if(e.key === "ArrowRight") rotation[0] += s;
-        if(e.key === "ArrowUp")    rotation[1] += s; // Axe 2 : Greenwich
-        if(e.key === "ArrowDown")  rotation[1] -= s;
-        if(e.key.toLowerCase() === "a") rotation[2] -= s; // Axe 3 : Orthogonal
-        if(e.key.toLowerCase() === "e") rotation[2] += s;
-        if(e.key === "+") zoom *= 1.1;
-        if(e.key === "-") zoom *= 0.9;
-        render();
-    });
-
-    function resize() {
-        mCanvas.attr("width", window.innerWidth).attr("height", window.innerHeight);
-        render();
-    }
-    window.addEventListener("resize", resize);
-</script>
-</body>
-</html>
+        ctx.strokeStyle = "rgba
