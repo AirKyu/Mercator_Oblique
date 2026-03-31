@@ -2,158 +2,134 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Mercator Oblique - Ultra HD</title>
+    <title>Mercator Oblique - Pro Performance</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/topojson@3"></script>
     <style>
         body { margin: 0; background: #020617; color: white; font-family: sans-serif; overflow: hidden; }
-        
-        /* Globe Pilote (Top-Left) */
         #globe-box {
             position: absolute; top: 20px; left: 20px;
-            width: 200px; height: 200px;
+            width: 180px; height: 180px;
             border: 2px solid #38bdf8; border-radius: 50%;
             background: #000; z-index: 50; overflow: hidden;
-            box-shadow: 0 0 30px rgba(56, 189, 248, 0.4);
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
         }
-
-        #ui-info {
+        #ui {
             position: absolute; bottom: 20px; left: 20px;
-            background: rgba(15, 23, 42, 0.9); padding: 15px;
-            border-radius: 10px; border: 1px solid #1e293b; z-index: 50;
-            font-size: 0.8rem; pointer-events: none;
+            background: rgba(15, 23, 42, 0.9); padding: 12px;
+            border-radius: 8px; border: 1px solid #1e293b; z-index: 50;
+            font-size: 0.75rem; pointer-events: none;
         }
-
         canvas { display: block; position: absolute; top: 0; left: 0; }
         #mC { z-index: 1; }
-        #gC { z-index: 51; }
-        kbd { background: #334155; padding: 2px 4px; border-radius: 4px; border: 1px solid #475569; }
     </style>
 </head>
 <body>
 
-<div id="globe-box"><canvas id="gC" width="200" height="200"></canvas></div>
-
-<div id="ui-info">
-    <b style="color:#38bdf8">MODE HAUTE DÉFINITION (50m)</b><br>
-    • <kbd>↑ ↓ ← →</kbd> : Axes 1 & 2 (Lon/Lat)<br>
-    • <kbd>A</kbd> / <kbd>E</kbd> : Axe 3 (Roll)<br>
-    • <kbd>Molette</kbd> : Zoom précis<br>
-    <div id="stats" style="margin-top:8px; font-family:monospace; color:#34d399;"></div>
-</div>
-
+<div id="globe-box"><canvas id="gC" width="180" height="180"></canvas></div>
+<div id="ui">🚀 <b>Mode Performance HD</b> | Flèches & A/E | Molette Zoom</div>
 <canvas id="mC"></canvas>
 
 <script>
     const mCanvas = d3.select("#mC");
-    const mCtx = mCanvas.node().getContext("2d");
+    const mCtx = mCanvas.node().getContext("2d", { alpha: false }); // Optimisation : pas de transparence alpha
     const gCanvas = d3.select("#gC");
     const gCtx = gCanvas.node().getContext("2d");
 
     let world = null;
     let rotation = [0, 0, 0];
     let scale = 350;
-    const dpr = window.devicePixelRatio || 1; // Gestion de la résolution écran (Retina/4K)
+    let needsUpdate = true; // Flag pour savoir s'il faut redessiner
+    const dpr = window.devicePixelRatio || 1;
 
     const projM = d3.geoMercator();
-    const projG = d3.geoOrthographic().clipAngle(90);
-    
+    const projG = d3.geoOrthographic().clipAngle(90).scale(88).translate([90, 90]);
     const pathM = d3.geoPath(projM, mCtx);
     const pathG = d3.geoPath(projG, gCtx);
 
-    // Chargement des données 50m (plus lourd mais beaucoup plus précis)
+    // Chargement HD 50m
     d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json").then(data => {
         world = topojson.feature(data, data.objects.countries);
         resize();
-        render();
+        requestAnimationFrame(gameLoop); // Lancement de la boucle fluide
     });
 
+    // BOUCLE DE RENDU 60 FPS
+    function gameLoop() {
+        if (needsUpdate && world) {
+            render();
+            needsUpdate = false;
+        }
+        requestAnimationFrame(gameLoop);
+    }
+
     function render() {
-        if (!world) return;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-
-        // Mise à jour des projections
+        const w = window.innerWidth, h = window.innerHeight;
         projM.scale(scale).translate([w/2, h/2]).rotate(rotation);
-        projG.scale(98).translate([100, 100]).rotate(rotation);
+        projG.rotate(rotation);
 
-        // --- DESSIN MERCATOR (RÉSOLUTION FINE) ---
-        mCtx.clearRect(0, 0, w, h);
+        // --- MERCATOR ---
         mCtx.fillStyle = "#020617";
         mCtx.fillRect(0, 0, w, h);
 
-        // 1. Grille très fine
-        mCtx.beginPath(); pathM(d3.geoGraticule()());
-        mCtx.strokeStyle = "rgba(148, 163, 184, 0.1)";
-        mCtx.lineWidth = 0.5;
-        mCtx.stroke();
+        // Grille (On dessine moins de lignes pour gagner en fluidité)
+        mCtx.beginPath(); pathM(d3.geoGraticule().step([20, 20])());
+        mCtx.strokeStyle = "rgba(148, 163, 184, 0.1)"; mCtx.lineWidth = 0.5; mCtx.stroke();
 
-        // 2. Pays Haute Définition
+        // Pays HD
         mCtx.beginPath(); pathM(world);
-        mCtx.fillStyle = "#1e293b";
-        mCtx.fill();
-        mCtx.strokeStyle = "#334155";
-        mCtx.lineWidth = 0.7; // Ligne plus fine pour plus de netteté
-        mCtx.stroke();
+        mCtx.fillStyle = "#1e293b"; mCtx.fill();
+        mCtx.strokeStyle = "#334155"; mCtx.lineWidth = 0.8; mCtx.stroke();
 
-        // 3. Équateur en surbrillance rouge (méthode haute précision)
+        // Equateur Rouge (Haute priorité)
         mCtx.beginPath();
-        pathM({type: "LineString", coordinates: Array.from({length: 361}, (_, i) => [i - 180, 0])});
-        mCtx.strokeStyle = "#ef4444";
-        mCtx.lineWidth = 2.5;
-        mCtx.shadowBlur = 8;
-        mCtx.shadowColor = "#ef4444";
-        mCtx.stroke();
-        mCtx.shadowBlur = 0;
+        pathM({type: "LineString", coordinates: Array.from({length: 181}, (_, i) => [i*2 - 180, 0])});
+        mCtx.strokeStyle = "#ef4444"; mCtx.lineWidth = 3;
+        mCtx.shadowBlur = 8; mCtx.shadowColor = "#ef4444";
+        mCtx.stroke(); mCtx.shadowBlur = 0;
 
-        // --- DESSIN GLOBE ---
-        gCtx.clearRect(0, 0, 200, 200);
-        gCtx.beginPath(); gCtx.arc(100, 100, 98, 0, Math.PI*2);
+        // --- GLOBE ---
+        gCtx.clearRect(0, 0, 180, 180);
+        gCtx.beginPath(); gCtx.arc(90, 90, 88, 0, Math.PI*2);
         gCtx.fillStyle = "#0f172a"; gCtx.fill();
-
+        
         gCtx.beginPath(); pathG(world);
         gCtx.fillStyle = "#1e293b"; gCtx.fill();
         gCtx.strokeStyle = "#334155"; gCtx.stroke();
 
         gCtx.beginPath();
-        pathG({type: "LineString", coordinates: Array.from({length: 361}, (_, i) => [i - 180, 0])});
-        gCtx.strokeStyle = "#ef4444"; gCtx.lineWidth = 1.5; gCtx.stroke();
-
-        d3.select("#stats").text(`LON: ${(-rotation[0]).toFixed(1)}° | LAT: ${(-rotation[1]).toFixed(1)}° | ROLL: ${rotation[2].toFixed(1)}°`);
+        pathG({type: "LineString", coordinates: Array.from({length: 91}, (_, i) => [i*4 - 180, 0])});
+        gCtx.strokeStyle = "#ef4444"; gCtx.lineWidth = 2; gCtx.stroke();
     }
 
-    // Gestion du clavier (3 axes)
-    window.addEventListener("keydown", e => {
-        const s = 5;
-        if(e.key === "ArrowLeft") rotation[0] -= s;
-        if(e.key === "ArrowRight") rotation[0] += s;
-        if(e.key === "ArrowUp") rotation[1] += s;
-        if(e.key === "ArrowDown") rotation[1] -= s;
-        if(e.key.toLowerCase() === "a") rotation[2] -= s;
-        if(e.key.toLowerCase() === "e") rotation[2] += s;
-        render();
-    });
+    // Gestion du clavier ultra-réactive
+    const keys = {};
+    window.addEventListener("keydown", e => { keys[e.key] = true; updateLogic(); });
+    window.addEventListener("keyup", e => { keys[e.key] = false; });
 
-    // Zoom molette
+    function updateLogic() {
+        const s = 4;
+        if(keys["ArrowLeft"])  { rotation[0] -= s; needsUpdate = true; }
+        if(keys["ArrowRight"]) { rotation[0] += s; needsUpdate = true; }
+        if(keys["ArrowUp"])    { rotation[1] += s; needsUpdate = true; }
+        if(keys["ArrowDown"])  { rotation[1] -= s; needsUpdate = true; }
+        if(keys["a"] || keys["A"]) { rotation[2] -= s; needsUpdate = true; }
+        if(keys["e"] || keys["E"]) { rotation[2] += s; needsUpdate = true; }
+        if(Object.values(keys).some(v => v)) requestAnimationFrame(updateLogic);
+    }
+
     window.addEventListener("wheel", e => {
-        e.preventDefault();
-        scale *= (e.deltaY > 0 ? 0.92 : 1.08);
-        render();
-    }, {passive:false});
+        scale *= (e.deltaY > 0 ? 0.94 : 1.06);
+        needsUpdate = true;
+    }, {passive:true});
 
-    // Ajustement de la résolution du Canvas
     function resize() {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        
-        // On multiplie la taille du canvas par le ratio de pixels de l'écran (DPR)
+        const w = window.innerWidth, h = window.innerHeight;
         mCanvas.attr("width", w * dpr).attr("height", h * dpr).style("width", w + "px").style("height", h + "px");
-        mCtx.scale(dpr, dpr); // On adapte le contexte pour que le dessin soit net
-
-        gCanvas.attr("width", 200 * dpr).attr("height", 200 * dpr).style("width", "200px").style("height", "200px");
+        mCtx.scale(dpr, dpr);
+        gCanvas.attr("width", 180 * dpr).attr("height", 180 * dpr).style("width", "180px").style("height", "180px");
         gCtx.scale(dpr, dpr);
-
-        render();
+        needsUpdate = true;
     }
 
     window.addEventListener("resize", resize);
