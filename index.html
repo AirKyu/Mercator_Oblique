@@ -2,110 +2,100 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Mercator Oblique - Plein Écran & Zoom</title>
+    <title>Mercator Debug Version</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/topojson@3"></script>
     <style>
-        body { margin: 0; background: #020617; color: white; font-family: sans-serif; overflow: hidden; }
-        
-        /* Globe Pilote (Top-Left) */
-        #globe-box {
-            position: absolute; top: 20px; left: 20px;
-            width: 180px; height: 180px;
-            border: 2px solid #38bdf8; border-radius: 50%;
-            background: #000; z-index: 50; overflow: hidden;
-            box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
-            pointer-events: none; /* Ne gêne pas le clic sur la carte */
-        }
-
-        #ui-info {
-            position: absolute; bottom: 20px; left: 20px;
-            background: rgba(15, 23, 42, 0.85); padding: 15px;
-            border-radius: 10px; border: 1px solid #1e293b; z-index: 50;
-            font-size: 0.75rem; line-height: 1.4;
-        }
-
-        .stat { color: #34d399; font-family: monospace; font-size: 0.85rem; margin-bottom: 8px; }
-        kbd { background: #334155; padding: 2px 4px; border-radius: 4px; border: 1px solid #475569; }
-
+        body { margin: 0; background: #020617; color: #38bdf8; font-family: sans-serif; overflow: hidden; }
+        #ui { position: absolute; top: 20px; left: 20px; z-index: 100; background: rgba(15,23,42,0.8); padding: 15px; border-radius: 10px; border: 1px solid #38bdf8; }
         canvas { display: block; position: absolute; top: 0; left: 0; }
-        #map-canvas { z-index: 1; }
-        #globe-canvas { z-index: 51; }
+        #globe-box { position: absolute; top: 20px; right: 20px; width: 150px; height: 150px; border: 1px solid #38bdf8; border-radius: 50%; overflow: hidden; z-index: 100; }
     </style>
 </head>
 <body>
 
-<div id="globe-box">
-    <canvas id="globe-canvas" width="180" height="180"></canvas>
+<div id="ui">
+    <h3 style="margin:0">🛠️ Test de Rendu</h3>
+    <div id="status">Connexion aux données...</div>
+    <p style="font-size: 0.7rem; color: #94a3b8;">Si vous voyez une grille bleue, le moteur fonctionne.</p>
 </div>
 
-<div id="ui-info">
-    <div class="stat">
-        LON: <span id="v1">0</span>° | 
-        LAT: <span id="v2">0</span>° | 
-        ROLL: <span id="v3">0</span>°
-    </div>
-    <b>CONTRÔLES :</b><br>
-    • <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> : Rotation Axes 1 & 2<br>
-    • <kbd>A</kbd> / <kbd>E</kbd> : Rotation Axe 3 (Roll)<br>
-    • <kbd>Molette</kbd> : Zoom / Dézoom<br>
-    • <kbd>Espace</kbd> : Réinitialiser
-</div>
-
-<canvas id="map-canvas"></canvas>
+<div id="globe-box"><canvas id="gC" width="150" height="150"></canvas></div>
+<canvas id="mC"></canvas>
 
 <script>
-    const mCanvas = d3.select("#map-canvas");
-    const mCtx = mCanvas.node().getContext("2d");
-    const gCanvas = d3.select("#globe-canvas");
-    const gCtx = gCanvas.node().getContext("2d");
-
+    const mCtx = d3.select("#mC").node().getContext("2d");
+    const gCtx = d3.select("#gC").node().getContext("2d");
+    let rotation = [0, 0, 0];
+    let scale = 250;
     let world = null;
-    let rotation = [0, 0, 0]; // [λ, φ, γ]
-    let scale = 300; // Niveau de zoom initial
 
-    const projG = d3.geoOrthographic().clipAngle(90).scale(88).translate([90, 90]);
     const projM = d3.geoMercator();
-
-    const pathG = d3.geoPath(projG, gCtx);
+    const projG = d3.geoOrthographic().clipAngle(90).scale(73).translate([75, 75]);
     const pathM = d3.geoPath(projM, mCtx);
+    const pathG = d3.geoPath(projG, gCtx);
 
-    // Chargement des données
-    d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(data => {
-        world = topojson.feature(data, data.objects.countries);
-        resize();
+    // 1. On lance le rendu IMMEDIATEMENT avec une grille
+    function render() {
+        const w = window.innerWidth, h = window.innerHeight;
+        d3.select("#mC").attr("width", w).attr("height", h);
+        
+        projM.scale(scale).translate([w/2, h/2]).rotate(rotation);
+        projG.rotate(rotation);
+
+        // Dessin Mercator
+        mCtx.fillStyle = "#020617"; mCtx.fillRect(0,0,w,h);
+        drawCommon(mCtx, pathM, true);
+
+        // Dessin Globe
+        gCtx.clearRect(0,0,150,150);
+        gCtx.beginPath(); gCtx.arc(75,75,73,0,Math.PI*2); gCtx.fillStyle="#0f172a"; gCtx.fill();
+        drawCommon(gCtx, pathG, false);
+    }
+
+    function drawCommon(ctx, p, full) {
+        // Grille (toujours visible)
+        ctx.beginPath(); p(d3.geoGraticule()());
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.2)"; ctx.stroke();
+
+        // Pays (si chargés)
+        if (world) {
+            ctx.beginPath(); p(world);
+            ctx.fillStyle = "#1e293b"; ctx.fill();
+            ctx.strokeStyle = "#334155"; ctx.stroke();
+        }
+
+        // Equateur ROUGE
+        ctx.beginPath(); p({type:"LineString", coordinates:[[-180,0],[180,0]]});
+        ctx.strokeStyle = "#ef4444"; ctx.lineWidth = full ? 3 : 1; ctx.stroke();
+    }
+
+    // 2. Tentative de chargement des pays
+    d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
+        .then(data => {
+            world = topojson.feature(data, data.objects.countries);
+            d3.select("#status").text("✅ Carte chargée").style("color", "#34d399");
+            render();
+        })
+        .catch(e => {
+            d3.select("#status").text("⚠️ Mode Grille (Offline)").style("color", "#fbbf24");
+            render();
+        });
+
+    // Contrôles
+    window.addEventListener("keydown", e => {
+        const s = 5;
+        if(e.key === "ArrowLeft") rotation[0] -= s;
+        if(e.key === "ArrowRight") rotation[0] += s;
+        if(e.key === "ArrowUp") rotation[1] += s;
+        if(e.key === "ArrowDown") rotation[1] -= s;
+        if(e.key === "a") rotation[2] -= s;
+        if(e.key === "e") rotation[2] += s;
         render();
     });
 
-    function render() {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-
-        // 1. GLOBE (Pilote)
-        projG.rotate(rotation);
-        gCtx.clearRect(0, 0, 180, 180);
-        
-        // Fond mer globe
-        gCtx.beginPath(); gCtx.arc(90, 90, 88, 0, Math.PI * 2);
-        gCtx.fillStyle = "#0f172a"; gCtx.fill();
-        
-        drawContent(gCtx, pathG, false);
-
-        // 2. CARTE MERCATOR (Plein écran)
-        projM.scale(scale).translate([w / 2, h / 2]).rotate(rotation);
-        mCtx.clearRect(0, 0, w, h);
-        mCtx.fillStyle = "#020617"; mCtx.fillRect(0, 0, w, h);
-        
-        drawContent(mCtx, pathM, true);
-
-        // UI
-        d3.select("#v1").text((-rotation[0]).toFixed(1));
-        d3.select("#v2").text((-rotation[1]).toFixed(1));
-        d3.select("#v3").text(rotation[2].toFixed(1));
-        d3.select("#val-zoom").text(Math.round(scale));
-    }
-
-    function drawContent(ctx, p, isFullMap) {
-        // Grille (Méridiens et Parallèles)
-        ctx.beginPath(); p(d3.geoGraticule()());
-        ctx.strokeStyle = "rgba
+    window.addEventListener("resize", render);
+    render();
+</script>
+</body>
+</html>
