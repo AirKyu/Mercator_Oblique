@@ -2,85 +2,84 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Mercator Oblique - Mobile HD</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Mercator Oblique - Responsive & Touch</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/topojson@3"></script>
     <style>
-        body { margin: 0; background: #020617; color: white; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        :root { --accent: #38bdf8; --bg: #020617; --panel: rgba(15, 23, 42, 0.9); }
+        body { margin: 0; background: var(--bg); color: white; font-family: system-ui, sans-serif; overflow: hidden; touch-action: none; }
         
-        /* Globe Pilote (Plus petit sur mobile) */
+        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+
+        /* Globe "Viseur" (Adaptatif) */
         #globe-box {
-            position: absolute; top: 10px; left: 10px;
-            width: 120px; height: 120px;
-            border: 1px solid #38bdf8; border-radius: 50%;
+            position: absolute; top: env(safe-area-inset-top, 20px); left: 20px;
+            width: clamp(100px, 25vw, 180px); height: clamp(100px, 25vw, 180px);
+            border: 1.5px solid var(--accent); border-radius: 50%;
             background: #000; z-index: 50; overflow: hidden;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
         }
 
-        /* Panneau de commandes tactiles */
-        #controls-mobile {
-            position: absolute; bottom: 10px; left: 50%;
-            transform: translateX(-50%);
-            display: grid; grid-template-columns: repeat(3, 1fr);
-            gap: 10px; background: rgba(15, 23, 42, 0.85);
-            padding: 15px; border-radius: 15px;
-            border: 1px solid #1e293b; z-index: 100;
-            width: 90%; max-width: 400px;
-            backdrop-filter: blur(10px);
+        /* Panneau de Contrôle Réactif */
+        #controls {
+            position: absolute; bottom: env(safe-area-inset-bottom, 20px);
+            left: 50%; transform: translateX(-50%);
+            width: 95%; max-width: 500px;
+            background: var(--panel); padding: 15px; border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.1); z-index: 100;
+            backdrop-filter: blur(15px);
+            display: flex; flex-direction: column; gap: 12px;
         }
 
-        .axis-ctrl { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-        .axis-label { font-size: 0.65rem; color: #38bdf8; font-weight: bold; text-transform: uppercase; }
+        .axis-row { display: flex; justify-content: space-around; align-items: center; }
+        .axis-group { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+        .label { font-size: 0.6rem; color: var(--accent); font-weight: bold; }
         
-        .btn-grid { display: flex; gap: 5px; }
-        .btn-ui {
-            width: 45px; height: 45px;
-            background: #1e293b; border: 1px solid #38bdf8;
-            color: white; border-radius: 8px;
-            font-size: 1.2rem; font-weight: bold;
+        .btn-wrap { display: flex; gap: 8px; }
+        .btn {
+            width: 48px; height: 48px; background: #1e293b; border: 1px solid var(--accent);
+            color: white; border-radius: 12px; font-size: 1.4rem;
             display: flex; align-items: center; justify-content: center;
-            cursor: pointer; -webkit-tap-highlight-color: transparent;
+            cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
         }
-        .btn-ui:active { background: #38bdf8; color: #020617; }
+        .btn:active { background: var(--accent); color: var(--bg); }
 
-        #stats-mini {
-            position: absolute; top: 10px; right: 10px;
-            font-family: monospace; font-size: 0.7rem; color: #34d399;
-            background: rgba(0,0,0,0.5); padding: 5px; border-radius: 5px;
+        #stats { font-family: monospace; font-size: 0.65rem; text-align: center; color: #34d399; opacity: 0.8; }
+
+        /* Tablette et Desktop : Ajustement de l'UI */
+        @media (min-width: 768px) {
+            #controls { left: auto; right: 20px; transform: none; width: 300px; }
         }
-
-        canvas { display: block; position: absolute; top: 0; left: 0; }
-        #mC { z-index: 1; }
     </style>
 </head>
 <body>
 
-<div id="globe-box"><canvas id="gC" width="120" height="120"></canvas></div>
+<div id="globe-box"><canvas id="gC"></canvas></div>
 
-<div id="stats-mini">
-    LON: <span id="s1">0</span> | LAT: <span id="s2">0</span> | ROL: <span id="s3">0</span>
-</div>
-
-<div id="controls-mobile">
-    <div class="axis-ctrl">
-        <div class="axis-label">Axe 1 (λ)</div>
-        <div class="btn-grid">
-            <button class="btn-ui" onclick="step(0, -1)">-</button>
-            <button class="btn-ui" onclick="step(0, 1)">+</button>
+<div id="controls">
+    <div id="stats">LON: 0° | LAT: 0° | ROLL: 0°</div>
+    <div class="axis-row">
+        <div class="axis-group">
+            <span class="label">LON</span>
+            <div class="btn-wrap">
+                <button class="btn" onclick="rotate(0,-1)">-</button>
+                <button class="btn" onclick="rotate(0,1)">+</button>
+            </div>
         </div>
-    </div>
-    <div class="axis-ctrl">
-        <div class="axis-label">Axe 2 (φ)</div>
-        <div class="btn-grid">
-            <button class="btn-ui" onclick="step(1, -1)">-</button>
-            <button class="btn-ui" onclick="step(1, 1)">+</button>
+        <div class="axis-group">
+            <span class="label">LAT</span>
+            <div class="btn-wrap">
+                <button class="btn" onclick="rotate(1,-1)">-</button>
+                <button class="btn" onclick="rotate(1,1)">+</button>
+            </div>
         </div>
-    </div>
-    <div class="axis-ctrl">
-        <div class="axis-label">Axe 3 (γ)</div>
-        <div class="btn-grid">
-            <button class="btn-ui" onclick="step(2, -1)">-</button>
-            <button class="btn-ui" onclick="step(2, 1)">+</button>
+        <div class="axis-group">
+            <span class="label">ROLL</span>
+            <div class="btn-wrap">
+                <button class="btn" onclick="rotate(2,-1)">-</button>
+                <button class="btn" onclick="rotate(2,1)">+</button>
+            </div>
         </div>
     </div>
 </div>
@@ -88,114 +87,111 @@
 <canvas id="mC"></canvas>
 
 <script>
-    const mCanvas = d3.select("#mC");
-    const mCtx = mCanvas.node().getContext("2d", { alpha: false });
-    const gCanvas = d3.select("#gC");
-    const gCtx = gCanvas.node().getContext("2d");
-
-    let world = null;
-    let rotation = [0, 0, 0];
-    let scale = 300;
-    let needsUpdate = true;
+    const mCanvas = d3.select("#mC"), mCtx = mCanvas.node().getContext("2d", {alpha: false});
+    const gCanvas = d3.select("#gC"), gCtx = gCanvas.node().getContext("2d");
+    
+    let world = null, rotation = [0, 0, 0], scale = 300, needsUpdate = true;
     const dpr = window.devicePixelRatio || 1;
 
+    // Moteurs de projection
     const projM = d3.geoMercator();
-    const projG = d3.geoOrthographic().clipAngle(90).scale(58).translate([60, 60]);
+    const projG = d3.geoOrthographic().clipAngle(90);
     const pathM = d3.geoPath(projM, mCtx);
     const pathG = d3.geoPath(projG, gCtx);
 
-    // Chargement Haute Définition
+    // --- LOGIQUE DE ZOOM TACTILE (PINCH) ---
+    let lastPinchDist = 0;
+
+    window.addEventListener("touchstart", e => {
+        if (e.touches.length === 2) {
+            lastPinchDist = Math.hypot(
+                e.touches[0].pageX - e.touches[1].pageX,
+                e.touches[0].pageY - e.touches[1].pageY
+            );
+        }
+    }, {passive: false});
+
+    window.addEventListener("touchmove", e => {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            const dist = Math.hypot(
+                e.touches[0].pageX - e.touches[1].pageX,
+                e.touches[0].pageY - e.touches[1].pageY
+            );
+            const delta = dist / lastPinchDist;
+            scale *= delta;
+            scale = Math.max(100, Math.min(15000, scale));
+            lastPinchDist = dist;
+            needsUpdate = true;
+        }
+    }, {passive: false});
+
+    // --- CHARGEMENT & RENDU ---
     d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json").then(data => {
         world = topojson.feature(data, data.objects.countries);
         resize();
-        requestAnimationFrame(gameLoop);
+        requestAnimationFrame(loop);
     });
 
-    function gameLoop() {
-        if (needsUpdate && world) {
-            render();
-            needsUpdate = false;
-        }
-        requestAnimationFrame(gameLoop);
+    function loop() {
+        if (needsUpdate && world) { render(); needsUpdate = false; }
+        requestAnimationFrame(loop);
     }
 
     function render() {
         const w = window.innerWidth, h = window.innerHeight;
+        const gDim = gCanvas.node().width / dpr;
+
         projM.scale(scale).translate([w/2, h/2]).rotate(rotation);
-        projG.rotate(rotation);
+        projG.scale(gDim/2 - 2).translate([gDim/2, gDim/2]).rotate(rotation);
 
-        mCtx.fillStyle = "#020617";
-        mCtx.fillRect(0, 0, w, h);
-
-        // Grille simplifiée pour mobile
+        // Mercator
+        mCtx.fillStyle = "#020617"; mCtx.fillRect(0,0,w,h);
         mCtx.beginPath(); pathM(d3.geoGraticule().step([30, 30])());
-        mCtx.strokeStyle = "rgba(148, 163, 184, 0.1)"; mCtx.lineWidth = 0.5; mCtx.stroke();
-
-        // Pays
+        mCtx.strokeStyle = "rgba(148, 163, 184, 0.1)"; mCtx.stroke();
+        
         mCtx.beginPath(); pathM(world);
         mCtx.fillStyle = "#1e293b"; mCtx.fill();
         mCtx.strokeStyle = "#334155"; mCtx.lineWidth = 0.8; mCtx.stroke();
 
-        // Equateur Rouge
+        // Equateur Rouge HD
         mCtx.beginPath();
         pathM({type: "LineString", coordinates: Array.from({length: 181}, (_, i) => [i*2 - 180, 0])});
-        mCtx.strokeStyle = "#ef4444"; mCtx.lineWidth = 3;
-        mCtx.shadowBlur = 8; mCtx.shadowColor = "#ef4444";
-        mCtx.stroke(); mCtx.shadowBlur = 0;
+        mCtx.strokeStyle = "#ef4444"; mCtx.lineWidth = 3; mCtx.stroke();
 
         // Globe
-        gCtx.clearRect(0, 0, 120, 120);
-        gCtx.beginPath(); gCtx.arc(60, 60, 58, 0, Math.PI*2);
+        gCtx.clearRect(0,0,gDim,gDim);
+        gCtx.beginPath(); gCtx.arc(gDim/2, gDim/2, gDim/2-2, 0, Math.PI*2);
         gCtx.fillStyle = "#0f172a"; gCtx.fill();
         gCtx.beginPath(); pathG(world);
         gCtx.fillStyle = "#1e293b"; gCtx.fill();
         gCtx.strokeStyle = "#334155"; gCtx.stroke();
-        gCtx.beginPath();
-        pathG({type: "LineString", coordinates: Array.from({length: 91}, (_, i) => [i*4 - 180, 0])});
-        gCtx.strokeStyle = "#ef4444"; gCtx.lineWidth = 1.5; gCtx.stroke();
-
+        
         updateStats();
     }
 
-    // Fonction de clic (1 degré par clic)
-    window.step = function(axis, delta) {
+    window.rotate = function(axis, delta) {
         rotation[axis] += delta;
-        if(axis === 1) rotation[1] = Math.max(-89, Math.min(89, rotation[1]));
         needsUpdate = true;
     };
 
     function updateStats() {
-        d3.select("#s1").text((-rotation[0]).toFixed(0));
-        d3.select("#s2").text((-rotation[1]).toFixed(0));
-        d3.select("#s3").text(rotation[2].toFixed(0));
+        d3.select("#stats").text(`LON: ${(-rotation[0]).toFixed(0)}° | LAT: ${(-rotation[1]).toFixed(0)}° | ROLL: ${rotation[2].toFixed(0)}°`);
     }
-
-    // Support Clavier conservé
-    window.addEventListener("keydown", e => {
-        const s = 1; // On passe à 1° pour la cohérence
-        if(e.key === "ArrowLeft") step(0, -s);
-        if(e.key === "ArrowRight") step(0, s);
-        if(e.key === "ArrowUp") step(1, s);
-        if(e.key === "ArrowDown") step(1, -s);
-        if(e.key.toLowerCase() === "a") step(2, -s);
-        if(e.key.toLowerCase() === "e") step(2, s);
-    });
-
-    // Zoom tactile (pincement) ou molette
-    window.addEventListener("wheel", e => {
-        scale *= (e.deltaY > 0 ? 0.94 : 1.06);
-        needsUpdate = true;
-    }, {passive:true});
 
     function resize() {
         const w = window.innerWidth, h = window.innerHeight;
+        const gBox = document.getElementById("globe-box").getBoundingClientRect();
+        
         mCanvas.attr("width", w * dpr).attr("height", h * dpr).style("width", w + "px").style("height", h + "px");
         mCtx.scale(dpr, dpr);
-        gCanvas.attr("width", 120 * dpr).attr("height", 120 * dpr).style("width", "120px").style("height", "120px");
+        
+        gCanvas.attr("width", gBox.width * dpr).attr("height", gBox.height * dpr).style("width", gBox.width + "px").style("height", gBox.height + "px");
         gCtx.scale(dpr, dpr);
         needsUpdate = true;
     }
 
+    window.addEventListener("wheel", e => { scale *= (e.deltaY > 0 ? 0.92 : 1.08); needsUpdate = true; }, {passive:true});
     window.addEventListener("resize", resize);
 </script>
 </body>
